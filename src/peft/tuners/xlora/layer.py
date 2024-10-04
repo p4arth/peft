@@ -107,23 +107,33 @@ class XLoraLinearLayer(XLoraLayer):
         # Ignore if disabled. We want to make sure this is always run.
         if not self.target.merged:
             for adapter_n, active_adapter in enumerate(self.target.active_adapters):
-                # TODO: implement X-LoRA with Lora+Dora layers
-                if self.target.use_dora[active_adapter]:
-                    raise ValueError("X-LoRA currently does not support LoRA layers with DoRA")
                 if active_adapter not in self.target.lora_A.keys():
                     continue
+                # TODO: implement X-LoRA with Lora+Dora layers
                 lora_A = self.target.lora_A[active_adapter]
                 lora_B = self.target.lora_B[active_adapter]
                 dropout = self.target.lora_dropout[active_adapter]
                 scaling = self.target.scaling[active_adapter]
                 x = x.to(lora_A.weight.dtype)  # type: ignore
+
                 if scalings is not None:
                     x_mod = self.apply_scalings_to_x(x, xlora_scalings, adapter_n)
                     scaling_weight = self.config.global_scaling_weight
                 else:
                     x_mod = x
                     scaling_weight = 1
-                result += lora_B(lora_A(dropout(x_mod))) * scaling * scaling_weight
+                    
+                if self.target.use_dora[active_adapter]:
+                    x = dropout(x)
+                    result += self.target.lora_magnitude_vector[active_adapter](
+                        x,
+                        lora_A=lora_A,
+                        lora_B=lora_B,
+                        scaling=scaling,
+                        base_layer=self.target.get_base_layer(),
+                    ) * scaling_weight
+                else:
+                    result += lora_B(lora_A(dropout(x_mod))) * scaling * scaling_weight
 
         result = result.to(previous_dtype)
         return result
